@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice Detector - JSON Output</title>
+    <style>
+        body { font-family: 'Courier New', Courier, monospace; background: #1e1e1e; color: #d4d4d4; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .container { background: #252526; padding: 2rem; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 500px; text-align: center; border: 1px solid #333; }
+        h1 { color: #569cd6; margin-bottom: 0.5rem; font-size: 1.5rem; }
+        .subtitle { color: #6a9955; margin-bottom: 2rem; font-size: 0.9rem; }
+        
+        .upload-box { border: 2px dashed #444; padding: 2rem; border-radius: 8px; margin-bottom: 1.5rem; cursor: pointer; transition: all 0.3s; background: #1e1e1e; }
+        .upload-box:hover { border-color: #569cd6; background: #2d2d2d; }
+        
+        input[type="file"] { display: none; }
+        
+        button { background: #0e639c; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 1rem; width: 100%; transition: 0.3s; font-family: 'Courier New', monospace; font-weight: bold; }
+        button:hover { background: #1177bb; }
+        
+        /* JSON Display Area */
+        .json-output { 
+            margin-top: 1.5rem; 
+            text-align: left; 
+            display: none; 
+            background: #1e1e1e; 
+            padding: 15px; 
+            border-radius: 6px; 
+            border: 1px solid #333;
+            color: #ce9178; /* JSON String Color */
+            font-size: 0.9rem;
+            overflow-x: auto;
+            white-space: pre-wrap; /* Wrap long text */
+        }
+        
+        .loader { border: 3px solid #333; border-top: 3px solid #569cd6; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; margin: 10px auto; display: none; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>{ "AI_Voice_Detector" }</h1>
+    <p class="subtitle">// Upload MP3/MPEG to get JSON response</p>
+    
+    <div class="upload-box" onclick="document.getElementById('fileInput').click()">
+        <p>Click to Upload Audio</p>
+        <small style="color: #6a9955;">(MP3 / MPEG Only)</small>
+        <input type="file" id="fileInput" accept=".mp3,audio/mpeg,audio/mp3">
+    </div>
+    <p id="fileName" style="font-size: 0.8rem; color: #569cd6; margin-bottom: 15px;"></p>
+
+    <button onclick="analyzeAudio()" id="analyzeBtn">RUN_ANALYSIS()</button>
+    <div class="loader" id="loader"></div>
+
+    <pre class="json-output" id="jsonOutput"></pre>
+</div>
+
+<script>
+    const fileInput = document.getElementById('fileInput');
+    const fileName = document.getElementById('fileName');
+    
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files.length > 0) {
+            const file = fileInput.files[0];
+            if (!file.name.toLowerCase().endsWith('.mp3') && !file.type.includes('mpeg')) {
+                alert("Error: Only .mp3 files allowed.");
+                fileInput.value = "";
+                return;
+            }
+            fileName.textContent = "Selected: " + file.name;
+            document.getElementById('jsonOutput').style.display = 'none';
+        }
+    });
+
+    async function analyzeAudio() {
+        if (fileInput.files.length === 0) {
+            alert("No file selected.");
+            return;
+        }
+
+        const file = fileInput.files[0];
+        const formData = new FormData();
+        formData.append("file", file);
+
+        document.getElementById('analyzeBtn').style.display = 'none';
+        document.getElementById('loader').style.display = 'block';
+        document.getElementById('jsonOutput').style.display = 'none';
+
+        try {
+            const response = await fetch('/predict', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+            
+            // --- DISPLAY RAW JSON ---
+            const jsonBox = document.getElementById('jsonOutput');
+            jsonBox.textContent = JSON.stringify(data, null, 4); // Indent with 4 spaces
+            jsonBox.style.display = 'block';
+
+        } catch (error) {
+            alert("Error: " + error.message);
+        } finally {
+            document.getElementById('analyzeBtn').style.display = 'block';
+            document.getElementById('loader').style.display = 'none';
+        }
+    }
+</script>
+
+</body>
+</html>
