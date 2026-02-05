@@ -1,23 +1,23 @@
 # ==============================================================================
-# AI VOICE DETECTOR - UNIVERSAL VERSION (FILE + BASE64 SUPPORT)
+# AI VOICE DETECTOR - BASE64 & FILE SUPPORT (HYBRID)
 # ==============================================================================
 import os
 import base64
-from fastapi import FastAPI, Request, HTTPException, Security, Depends
+import io
+import numpy as np
+import librosa
+import warnings
+from fastapi import FastAPI, HTTPException, Security, Depends, Request
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-import numpy as np
-import librosa
-import io
-import warnings
-from typing import Dict, Any
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
-app = FastAPI(title="AI Voice Detector Universal", version="Universal.1.0")
+app = FastAPI(title="AI Voice Detector Base64", version="Base64.1.0")
 
 # Enable CORS
 app.add_middleware(
@@ -35,26 +35,21 @@ API_KEY_NAME = "x-api-key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 MATCH_API_KEY = os.getenv("API_KEY", "shakti123")
 
-async def get_api_key(
-    request: Request,
-    api_key_header: str = Security(api_key_header)
-):
-    # 1. Try Header
+async def get_api_key(api_key_header: str = Security(api_key_header)):
     if api_key_header == MATCH_API_KEY:
         return api_key_header
-    
-    # 2. Try Query Parameter (Example: ?api_key=shakti123) - Helpful for some tools
-    query_key = request.query_params.get("api_key")
-    if query_key == MATCH_API_KEY:
-        return query_key
+    else:
+        raise HTTPException(
+            status_code=403, 
+            detail="❌ Access Denied: Invalid or Missing API Key"
+        )
 
-    raise HTTPException(
-        status_code=403, 
-        detail="❌ Access Denied: Invalid or Missing API Key"
-    )
+# --- REQUEST MODEL FOR BASE64 ---
+class AudioRequest(BaseModel):
+    audio_data: str  # This will hold the long Base64 string
 
 # ==============================================================================
-# FEATURE EXTRACTION (UNTOUCHED)
+# FEATURE EXTRACTION & LOGIC (UNTOUCHED)
 # ==============================================================================
 def calculate_features(audio: np.ndarray, sr: int) -> Dict[str, float]:
     try:
@@ -118,69 +113,41 @@ def process_audio(y: np.ndarray, sr: int):
     }
 
 # ==============================================================================
-# UNIVERSAL ENDPOINT (HANDLES FILE & BASE64)
+# NEW API ENDPOINT (SUPPORTS BASE64 JSON)
 # ==============================================================================
 @app.post("/predict")
-async def predict_endpoint(request: Request, api_key: str = Depends(get_api_key)):
-    content_type = request.headers.get("content-type", "")
-    y = None
-    sr = None
-
+async def predict_endpoint(
+    request: AudioRequest,  # Now accepting JSON Body
+    api_key: str = Depends(get_api_key)
+):
     try:
-        # CASE 1: JSON Input (Base64) - For Testing Tools
-        if "application/json" in content_type:
-            try:
-                data = await request.json()
-                b64_string = None
-                
-                # Try to find base64 string in any key
-                for key, value in data.items():
-                    if isinstance(value, str) and len(value) > 100:
-                        b64_string = value
-                        break
-                
-                if not b64_string:
-                    raise HTTPException(400, "No Base64 audio found in JSON")
-                
-                # Fix padding if needed
-                b64_string = b64_string.split(",")[-1] # Remove data:audio/mp3;base64, prefix if present
-                missing_padding = len(b64_string) % 4
-                if missing_padding:
-                    b64_string += '=' * (4 - missing_padding)
-                    
-                audio_bytes = base64.b64decode(b64_string)
-                y, sr = librosa.load(io.BytesIO(audio_bytes), sr=SAMPLE_RATE)
-            except Exception as e:
-                print(f"Base64 Error: {e}")
-                raise HTTPException(400, "Invalid Base64 Audio Data")
-
-        # CASE 2: File Upload - For Website
-        elif "multipart/form-data" in content_type:
-            form = await request.form()
-            file = form.get("file")
-            if not file:
-                raise HTTPException(400, "No file uploaded")
+        # 1. Get the Base64 string
+        base64_string = request.audio_data
+        
+        # 2. Clean the string (Remove header like "data:audio/mp3;base64,")
+        if "," in base64_string:
+            base64_string = base64_string.split(",")[1]
             
-            content = await file.read()
-            y, sr = librosa.load(io.BytesIO(content), sr=SAMPLE_RATE)
+        # 3. Decode Base64 to Bytes
+        try:
+            audio_bytes = base64.b64decode(base64_string)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Base64 Audio Data")
 
-        else:
-            raise HTTPException(400, "Unsupported Content-Type. Use JSON (Base64) or Multipart (File).")
-
-        # Process Audio
+        # 4. Load audio using Librosa
+        y, sr = librosa.load(io.BytesIO(audio_bytes), sr=SAMPLE_RATE)
+        
+        # 5. Check Duration
         if librosa.get_duration(y=y, sr=sr) < 0.5:
             raise HTTPException(400, "Audio too short.")
             
+        # 6. Process
         result = process_audio(y, sr)
         return result
-
-    except HTTPException as he:
-        raise he
+        
     except Exception as e:
         print(f"Server Error: {e}")
-        return JSONResponse(status_code=500, content={"detail": f"Internal Error: {str(e)}"})
-
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+        return JSONResponse(status_code=500, content={"detail": f"Processing Error: {str(e)}"})
 
 if __name__ == "__main__":
     import uvicorn
